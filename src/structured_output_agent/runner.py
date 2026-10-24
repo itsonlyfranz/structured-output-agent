@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, ValidationError
 
 from .errors import RetriesExhausted, StructuredOutputError
@@ -55,14 +55,21 @@ def errors_from_state(errors: list[dict]) -> list[StructuredOutputError]:
 class StructuredRunner:
     """Asks the LLM for output validated against a Pydantic model, retrying with error feedback.
 
-    Each run is a LangGraph StateGraph (generate -> validate -> retry | done), checkpointed per run id.
+    Each run is a LangGraph StateGraph (generate -> validate -> retry | done). Pass a `checkpointer`
+    to persist each run's state under its run id; by default nothing is retained between runs.
     """
 
-    def __init__(self, client: LLMClient, failure_log: ValidationFailureLog | None = None, max_retries: int = 3):
+    def __init__(
+        self,
+        client: LLMClient,
+        failure_log: ValidationFailureLog | None = None,
+        max_retries: int = 3,
+        checkpointer: BaseCheckpointSaver | None = None,
+    ):
         self.client = client
         self.failure_log = failure_log or ValidationFailureLog()
         self.max_retries = max_retries
-        self.checkpointer = MemorySaver()
+        self.checkpointer = checkpointer
 
     def run(self, prompt: str, model: type[M], *, system: str = "") -> StructuredResult[M]:
         run_id = uuid.uuid4().hex[:8]

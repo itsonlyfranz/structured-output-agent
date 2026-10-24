@@ -80,9 +80,30 @@ def test_final_output_validated_against_schema():
 
 
 def test_step_budget_enforced():
-    agent, _ = make([call(x=1)] * 2, lambda x: {"y": x}, max_steps=2)
+    agent, _ = make([call(x=1)] * 3, lambda x: {"y": x}, max_steps=2)
     with pytest.raises(AgentError):
         agent.run("go", Final)
+
+
+def test_over_budget_tool_call_is_not_executed():
+    executed = []
+    agent, _ = make([call(x=1), call(x=2)], lambda x: executed.append(x) or {"y": x}, max_steps=1)
+    with pytest.raises(AgentError):
+        agent.run("go", Final)
+    assert executed == [1]
+
+
+def test_final_answer_allowed_after_last_budgeted_tool_call():
+    agent, _ = make([call(x=2), FINAL], lambda x: {"y": x * 2}, max_steps=1)
+    res = agent.run("go", Final)
+    assert res.output == Final(answer=4) and res.tool_calls == ["double"]
+
+
+def test_step_budget_after_rejected_reply_is_not_reported_as_retries_exhausted():
+    agent, _ = make([call(x=1), "junk", call(x=2)], lambda x: {"y": x}, max_steps=1)
+    with pytest.raises(AgentError) as exc:
+        agent.run("go", Final)
+    assert not isinstance(exc.value, RetriesExhausted)
 
 
 def test_persistent_garbage_raises_retries_exhausted():

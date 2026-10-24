@@ -1,8 +1,8 @@
 """The agent flow as a LangGraph StateGraph.
 
     START -> generate -> validate --valid, final--> END
-                ^           |  \\--valid, action--> act --budget left--> generate
-                |           |                          \\--budget spent--> fail
+                ^           |  \\--valid, action, budget left--> act --> generate
+                |           |  \\--valid, action, budget spent--> fail
                 +--invalid--+ (retries left)
                             \\--invalid, retries spent--> fail
 """
@@ -103,17 +103,14 @@ def build_graph(
         }
 
     def fail(state: State) -> dict[str, Any]:
-        return {"status": "retries_exhausted" if state["errors"] else "step_budget"}
+        return {"status": "retries_exhausted" if state["value"] is None else "step_budget"}
 
     def after_validate(state: State) -> str:
         if state["value"] is None:  # validation failed
             return "generate" if state["attempt"] <= max_retries else "fail"
         if state["is_final"]:
             return END
-        return "act"
-
-    def after_act(state: State) -> str:
-        return "generate" if state["steps"] < max_steps else "fail"
+        return "act" if state["steps"] < max_steps else "fail"
 
     g = StateGraph(State)
     g.add_node("generate", generate)
@@ -125,16 +122,20 @@ def build_graph(
     if act is not None:
         g.add_node("act", act_node)
         g.add_conditional_edges("validate", after_validate, ["generate", "fail", "act", END])
-        g.add_conditional_edges("act", after_act, ["generate", "fail"])
+        g.add_edge("act", "generate")
     else:
         g.add_conditional_edges("validate", after_validate, ["generate", "fail", END])
     return g.compile(checkpointer=checkpointer)
 
 
 def run_graph(graph, messages: list[Message], run_id: str, recursion_limit: int) -> tuple[State, list[str]]:
-    """Execute the graph, returning the final state (read back from the checkpointer) and the node trace."""
+    """Execute the graph, returning the final state and the node trace."""
     config = {"configurable": {"thread_id": run_id}, "recursion_limit": recursion_limit}
     trace: list[str] = []
-    for update in graph.stream(initial_state(messages), config, stream_mode="updates"):
-        trace.extend(update)
-    return graph.get_state(config).values, trace
+    state: State = initial_state(messages)
+    for mode, chunk in graph.stream(state, config, stream_mode=["updates", "values"]):
+        if mode == "updates":
+            trace.extend(chunk)
+        else:
+            state = chunk
+    return state, trace

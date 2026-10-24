@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
 from structured_output_agent import RetriesExhausted, StructuredRunner, ValidationFailureLog
@@ -23,7 +24,7 @@ def test_clean_run_has_no_retry_edge():
 
 def test_exhaustion_ends_in_fail_node_with_checkpointed_status():
     log = ValidationFailureLog()
-    runner = StructuredRunner(FakeClient(["x"] * 2), log, max_retries=1)
+    runner = StructuredRunner(FakeClient(["x"] * 2), log, max_retries=1, checkpointer=MemorySaver())
     with pytest.raises(RetriesExhausted):
         runner.run("q", P)
     thread = log.records[0].run_id
@@ -31,12 +32,18 @@ def test_exhaustion_ends_in_fail_node_with_checkpointed_status():
     assert values["status"] == "retries_exhausted" and len(values["errors"]) == 2
 
 
-def test_run_state_is_checkpointed_per_run():
-    runner = StructuredRunner(FakeClient(["bad", '{"n": 1}']))
+def test_run_state_is_checkpointed_per_run_when_opted_in():
+    runner = StructuredRunner(FakeClient(["bad", '{"n": 1}']), checkpointer=MemorySaver())
     res = runner.run("q", P)
     tup = runner.checkpointer.get_tuple({"configurable": {"thread_id": res.run_id}})
     values = tup.checkpoint["channel_values"]
     assert values["status"] == "done" and values["attempt"] == 2 and values["value"] == P(n=1)
+
+
+def test_runner_retains_no_checkpoints_by_default():
+    runner = StructuredRunner(FakeClient(['{"n": 1}']))
+    res = runner.run("q", P)
+    assert runner.checkpointer is None and res.value == P(n=1) and res.attempts == 1
 
 
 def test_anthropic_client_flattens_langchain_content_blocks():
