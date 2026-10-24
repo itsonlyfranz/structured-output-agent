@@ -7,10 +7,11 @@ from typing import Annotated, Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from .errors import AgentError, StructuredOutputError
+from .errors import AgentError, RetriesExhausted, StructuredOutputError
 from .extract import extract_json
-from .llm import LLMClient, Message
-from .runner import StructuredRunner, format_validation_error
+from .graph import ActResult, build_graph, run_graph
+from .llm import Message
+from .runner import StructuredRunner, errors_from_state, format_validation_error
 from .tools import ToolRegistry
 
 M = TypeVar("M", bound=BaseModel)
@@ -37,10 +38,11 @@ class AgentResult(Generic[M]):
     steps: int
     run_id: str
     tool_calls: list[str] = field(default_factory=list)
+    trace: list[str] = field(default_factory=list)  # LangGraph nodes visited, in order
 
 
 class ToolAgent:
-    """Loop: model picks a tool or a final answer as schema-validated JSON; every tool result is validated too."""
+    """LangGraph agent: generate -> validate -> (act -> generate)* -> final. Every model step and tool result is validated."""
 
     def __init__(self, runner: StructuredRunner, tools: ToolRegistry, max_steps: int = 8):
         self.runner = runner
@@ -57,7 +59,7 @@ class ToolAgent:
         )
 
     def _validator(self, output_model: type[M]):
-        def validate(text: str) -> tuple[CallTool, Any] | tuple[FinalAnswer, M]:
+        def validate(text: str) -> tuple[bool, Any, str]:
             data = extract_json(text)
             try:
                 step = _step_adapter.validate_python(data)
@@ -67,38 +69,44 @@ class ToolAgent:
                 ) from exc
             if isinstance(step, FinalAnswer):
                 try:
-                    return step, output_model.model_validate(step.output)
+                    return True, output_model.model_validate(step.output), text
                 except ValidationError as exc:
                     raise StructuredOutputError(
                         "schema_error",
                         "Your final output did not match the required schema.",
                         format_validation_error(exc),
                     ) from exc
-            return step, self.tools.get(step.tool).parse_args(step.arguments)
+            args = self.tools.get(step.tool).parse_args(step.arguments)
+            return False, (step.tool, args), step.model_dump_json()
 
         return validate
 
+    def _act(self, value: tuple[str, BaseModel]) -> ActResult:
+        name, args = value
+        try:
+            return ActResult(name, f"Tool result: {self.tools.get(name).call(args).model_dump_json()}")
+        except StructuredOutputError as err:
+            return ActResult(name, f"Tool failed: {err.feedback()}\nFix your arguments or try another approach.", err)
+
     def run(self, task: str, output_model: type[M]) -> AgentResult[M]:
         run_id = uuid.uuid4().hex[:8]
-        convo: list[Message] = [Message(role="user", content=task)]
-        validate = self._validator(output_model)
-        called: list[str] = []
-        for step_no in range(1, self.max_steps + 1):
-            res = self.runner.ask(
-                convo, validate, system=self._system(output_model), schema="AgentStep", run_id=run_id
-            )
-            step, parsed = res.value
-            convo.append(Message(role="assistant", content=step.model_dump_json()))
-            if isinstance(step, FinalAnswer):
-                return AgentResult(parsed, step_no, run_id, called)
-            tool = self.tools.get(step.tool)
-            called.append(step.tool)
-            try:
-                observation = f"Tool result: {tool.call(parsed).model_dump_json()}"
-            except StructuredOutputError as err:
-                self.runner.failure_log.record(
-                    run_id=run_id, schema=f"tool:{step.tool}", attempt=step_no, error=err, raw_output=step.model_dump_json()
-                )
-                observation = f"Tool failed: {err.feedback()}\nFix your arguments or try another approach."
-            convo.append(Message(role="user", content=observation))
-        raise AgentError(f"agent did not finish within {self.max_steps} steps")
+        graph = build_graph(
+            client=self.runner.client,
+            system=self._system(output_model),
+            schema="AgentStep",
+            run_id=run_id,
+            validate=self._validator(output_model),
+            failure_log=self.runner.failure_log,
+            max_retries=self.runner.max_retries,
+            act=self._act,
+            max_steps=self.max_steps,
+            checkpointer=self.runner.checkpointer,
+        )
+        # Generous cap: LangGraph's recursion limit is a backstop; the explicit budgets above fire first.
+        limit = 3 * (self.max_steps + 1) * (self.runner.max_retries + 2)
+        state, trace = run_graph(graph, [Message(role="user", content=task)], run_id, limit)
+        if state["status"] == "retries_exhausted":
+            raise RetriesExhausted("AgentStep", errors_from_state(state["errors"]))
+        if state["status"] != "done":
+            raise AgentError(f"agent did not finish within {self.max_steps} steps")
+        return AgentResult(state["value"], state["steps"] + 1, run_id, state["tool_calls"], trace)

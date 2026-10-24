@@ -17,23 +17,31 @@ class LLMClient(Protocol):
         ...
 
 
+def _text_of(content: object) -> str:
+    """Flatten a LangChain message `content` (str or list of content blocks) to plain text."""
+    if isinstance(content, str):
+        return content
+    return "".join(
+        b if isinstance(b, str) else b.get("text", "") for b in content if isinstance(b, str) or b.get("type") == "text"
+    )  # type: ignore[union-attr]
+
+
 class AnthropicClient:
-    """LLMClient backed by the official Anthropic SDK."""
+    """LLMClient backed by Claude through langchain-anthropic's ChatAnthropic.
 
-    def __init__(self, api_key: str | None, model: str, max_tokens: int = 2048):
-        import anthropic
+    `chat_model` may be injected (any LangChain chat model) for tests.
+    """
 
-        if not api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY is not set (export it or put it in a gitignored .env)")
-        self._client = anthropic.Anthropic(api_key=api_key)
+    def __init__(self, api_key: str | None, model: str, max_tokens: int = 2048, chat_model: object | None = None):
+        if chat_model is None:
+            from langchain_anthropic import ChatAnthropic
+
+            if not api_key:
+                raise RuntimeError("ANTHROPIC_API_KEY is not set (export it or put it in a gitignored .env)")
+            chat_model = ChatAnthropic(model=model, api_key=api_key, max_tokens=max_tokens)
+        self._chat = chat_model
         self.model = model
-        self.max_tokens = max_tokens
 
     def complete(self, *, system: str, messages: Sequence[Message]) -> str:
-        response = self._client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            system=system,
-            messages=list(messages),
-        )
-        return "".join(block.text for block in response.content if block.type == "text")
+        reply = self._chat.invoke([("system", system), *((m["role"], m["content"]) for m in messages)])  # type: ignore[attr-defined]
+        return _text_of(reply.content)

@@ -51,6 +51,7 @@ def run_demo(log_path: Path | None = None) -> ValidationFailureLog:
     )
     result = StructuredRunner(client, log).run("Invoice from Acme, 120.50 USD", Invoice)
     print(f"valid after {result.attempts} attempts -> {result.value}")
+    print("graph trace:", " -> ".join(result.trace))
 
     print("\n== 2. Agent with validated tool calls and results ==")
     tools = ToolRegistry([Tool("lookup_price", "Get unit price for a SKU", LookupIn, LookupOut, _lookup)])
@@ -62,6 +63,7 @@ def run_demo(log_path: Path | None = None) -> ValidationFailureLog:
     ]
     agent_result = ToolAgent(StructuredRunner(FakeClient(steps), log), tools).run("Quote SKU A1", Quote)
     print(f"final output {agent_result.output} after {agent_result.steps} steps, tools: {agent_result.tool_calls}")
+    print("graph trace:", " -> ".join(agent_result.trace))
 
     print(f"\n== Validation failures logged: {len(log.records)} ==")
     for r in log.records:
