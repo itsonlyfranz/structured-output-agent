@@ -19,7 +19,7 @@
 |---|---|---|
 | Enforce Pydantic JSON schemas | `runner.py` (`StructuredRunner.run`) sends the model's JSON Schema and validates every reply with `model_validate` | `tests/test_runner.py::test_schema_is_sent_to_the_model`, `test_retries_on_schema_error_and_feedback_names_field` |
 | Validate tool responses | `tools.py` validates tool **arguments** before execution and tool **results** after; tool exceptions are contained | `tests/test_agent.py::test_bad_tool_args_trigger_retry_not_tool_execution`, `test_invalid_tool_result_is_logged_and_reported_to_model`, `test_tool_exception_does_not_crash_agent` |
-| Retry on parse errors | `StructuredRunner.ask` re-prompts with the rejected reply plus precise errors, up to `max_retries` | `test_retries_on_parse_error_with_feedback`, `test_exhausted_retries_raise_and_log_every_attempt`, `tests/test_graph.py::test_trace_shows_conditional_retry_edges` |
+| Retry on parse errors | the `validate` → `generate` retry edge in `graph.py` re-prompts with the rejected reply plus precise errors, up to `max_retries` | `test_retries_on_parse_error_with_feedback`, `test_exhausted_retries_raise_and_log_every_attempt`, `tests/test_graph.py::test_trace_shows_conditional_retry_edges` |
 | Log validation failures | `failures.py`: in-memory records + append-only JSONL (kind, schema, attempt, errors, raw output, run id) | `test_failures_logged_to_jsonl`, `tests/test_config_cli.py::test_demo_runs_offline_and_writes_log` |
 
 ## Architecture
