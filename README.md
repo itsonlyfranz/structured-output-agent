@@ -2,6 +2,16 @@
 
 **Making LLMs reliable, not random.** An agent harness that forces model output into Pydantic schemas, validates every tool call and tool result, retries with targeted error feedback when the model gets it wrong, and keeps an audit log of every validation failure.
 
+**Technologies:** Python 3.11+, Pydantic v2, Anthropic SDK (`claude-sonnet-5-5`), pytest
+
+## Highlights
+
+- Every model reply is parsed and validated against a Pydantic schema; invalid output is never returned, only retried or raised as `RetriesExhausted`.
+- Corrective retries feed back the rejected reply and exact field errors: in the offline demo, a non-JSON reply and a schema-violating reply (2 field errors) are fixed on attempt 3.
+- Tool arguments are validated before execution and tool results after it, so bad arguments never reach a tool and bad data never reaches the model unflagged.
+- Five failure kinds (`parse_error`, `schema_error`, `tool_args_error`, `tool_result_error`, `tool_error`) are logged to JSONL; the demo records 4 of them.
+- The LLM sits behind a one-method interface, so all 21 tests run offline in about a second with a scripted fake client.
+
 ## What it demonstrates
 
 | Capability | Where | Proved by |
@@ -26,10 +36,15 @@
      extract_json → Pydantic model → (tool args → Tool.call → tool result)
 ```
 
+Components and responsibilities:
+
 - `llm.py`: tiny `LLMClient` protocol (`complete(system, messages) -> str`) plus `AnthropicClient`. This is the only provider seam.
 - `extract.py`: tolerant JSON extraction (code fences, surrounding prose).
 - `runner.py`: the retry loop; failures become corrective user messages naming the offending fields.
 - `agent.py`: a tool-using loop where each turn is a discriminated-union step (`call_tool` | `final`). Bad arguments and a malformed final answer are retried; bad tool results/exceptions are logged and fed back as observations. Step budget prevents runaway loops.
+- `tools.py`: `Tool` / `ToolRegistry` with Pydantic input and output models; validates arguments, executes, validates results.
+- `failures.py`: `ValidationFailureLog`, the in-memory and JSONL audit trail.
+- `config.py` / `cli.py` / `demo.py`: environment settings, the `soa` command, and the offline demo.
 - `testing.py`: `FakeClient` replays scripted replies, so the whole suite and the demo are offline.
 
 ## Quickstart
