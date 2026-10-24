@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from structured_output_agent import RetriesExhausted, StructuredRunner, ValidationFailureLog
 from structured_output_agent.llm import AnthropicClient
@@ -44,6 +44,14 @@ def test_runner_retains_no_checkpoints_by_default():
     runner = StructuredRunner(FakeClient(['{"n": 1}']))
     res = runner.run("q", P)
     assert runner.checkpointer is None and res.value == P(n=1) and res.attempts == 1
+
+
+def test_checkpointed_run_returns_in_process_validated_value():
+    class Local(BaseModel):
+        total: int = Field(alias="Total")
+
+    res = StructuredRunner(FakeClient(['{"Total": 3}']), checkpointer=MemorySaver()).run("q", Local)
+    assert type(res.value) is Local and res.value.total == 3
 
 
 def test_anthropic_client_flattens_langchain_content_blocks():

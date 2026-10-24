@@ -90,7 +90,8 @@ def test_over_budget_tool_call_is_not_executed():
     agent, _ = make([call(x=1), call(x=2)], lambda x: executed.append(x) or {"y": x}, max_steps=1)
     with pytest.raises(AgentError):
         agent.run("go", Final)
-    assert executed == [1]
+    assert executed == [1] and len(agent.runner.client.calls) == 2
+    assert agent.runner.client.calls[1][1][-1]["content"].startswith("Tool result:")
 
 
 def test_final_answer_allowed_after_last_budgeted_tool_call():

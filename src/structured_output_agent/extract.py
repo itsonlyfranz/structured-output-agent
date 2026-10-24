@@ -13,13 +13,6 @@ def extract_json(text: str) -> Any:
     """Parse the JSON value in a model reply, tolerating code fences and surrounding prose."""
     candidates = [text.strip()]
     candidates += [m.strip() for m in _FENCE.findall(text)]
-    start = text.find("{")
-    if start != -1:
-        try:
-            value, _ = json.JSONDecoder().raw_decode(text[start:])
-            return value
-        except json.JSONDecodeError:
-            pass
     first_error: json.JSONDecodeError | None = None
     for candidate in candidates:
         try:
@@ -27,6 +20,12 @@ def extract_json(text: str) -> Any:
         except json.JSONDecodeError as exc:
             first_error = first_error or exc
     assert first_error is not None
+    start = text.find("{")
+    if start != -1:
+        try:
+            return json.JSONDecoder().raw_decode(text[start:])[0]
+        except json.JSONDecodeError:
+            pass
     raise StructuredOutputError(
         "parse_error",
         "Your reply was not valid JSON.",
