@@ -19,8 +19,8 @@ END_MARK = "<!-- flow-diagram:end -->"
 BLOCK = re.compile(re.escape(START_MARK) + r".*?" + re.escape(END_MARK), re.DOTALL)
 
 
-def flow_mermaid() -> str:
-    """Mermaid source for the tool-using graph (the superset of the runner's graph)."""
+def drawable_graph():
+    """The tool-using graph (the superset of the runner's graph), compiled but never run."""
     sys.path.insert(0, str(ROOT / "src"))
     from structured_output_agent.failures import ValidationFailureLog
     from structured_output_agent.graph import ActResult, build_graph
@@ -36,7 +36,11 @@ def flow_mermaid() -> str:
         act=lambda value: ActResult(tool="", observation=""),
         max_steps=1,
     )
-    return graph.get_graph().draw_mermaid().strip()
+    return graph.get_graph()
+
+
+def flow_mermaid() -> str:
+    return drawable_graph().draw_mermaid().strip()
 
 
 def render_block() -> str:

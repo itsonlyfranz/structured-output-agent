@@ -84,7 +84,6 @@ flowchart LR
     Agent --> Extract
     Graph --> Failures["failures.py<br/>ValidationFailureLog"]
     Agent --> Tools["tools.py<br/>ToolRegistry"]
-    Tools --> Failures
     Failures --> Log[("validation_failures.jsonl")]
 ```
 
