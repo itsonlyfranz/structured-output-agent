@@ -11,7 +11,7 @@
 - Corrective retries feed back the rejected reply and exact field errors: in the offline demo, a non-JSON reply and a schema-violating reply (2 field errors) are fixed on attempt 3.
 - Tool arguments are validated before execution and tool results after it, so bad arguments never reach a tool and bad data never reaches the model unflagged.
 - Five failure kinds (`parse_error`, `schema_error`, `tool_args_error`, `tool_result_error`, `tool_error`) are logged to JSONL; the demo records 4 of them.
-- The LLM sits behind a one-method interface, so all 26 tests run offline in about a second with a scripted fake client.
+- The LLM sits behind a one-method interface, so all 33 tests run offline in about a second with a scripted fake client.
 
 ## What it demonstrates
 
@@ -96,4 +96,4 @@ result = runner.run("Invoice from Acme, 120.50 USD", Invoice)   # result.value i
 
 ## Tests
 
-`pytest` runs 26 offline tests against `FakeClient`; the table above maps each capability to its tests.
+`pytest` runs the whole suite offline against `FakeClient`; the table above maps each capability to its tests.
